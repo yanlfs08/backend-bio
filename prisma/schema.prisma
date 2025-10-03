@@ -1,5 +1,4 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// prisma/schema.prisma
 
 generator client {
   provider = "prisma-client-js"
@@ -11,14 +10,122 @@ datasource db {
 }
 
 model User {
-  id            String    @id @default(uuid())
-  name          String
-  email         String    @unique
-  password_hash String
-  roles         String[]  @default(["user"])
-  is_active     Boolean   @default(true)
-  created_at    DateTime  @default(now())
-  updated_at    DateTime  @updatedAt
+  id                  String              @id @default(uuid())
+  name                String
+  email               String              @unique
+  password_hash       String
+  roles               String[]            @default(["user"])
+  is_active           Boolean             @default(true)
+  created_at          DateTime            @default(now())
+  updated_at          DateTime            @updatedAt
+  purchase_orders     PurchaseOrder[]
+  approved_order_items OrderItem[]
+  stock_withdrawals   StockWithdrawal[]
 
-  @@map("users") // Mapeia este modelo para a tabela "users" no banco
+  @@map("users")
+}
+
+model Reagent {
+  id                 String            @id @default(uuid())
+  name               String
+  manufacturer       String?
+  catalog_number     String?           @unique
+  unit_of_measure    String
+  quantity_on_hand   Decimal           @default(0)
+  min_stock_level    Decimal?
+  storage_location   String?
+  created_at         DateTime          @default(now())
+  updated_at         DateTime          @updatedAt
+  order_items        OrderItem[]
+  stock_withdrawals  StockWithdrawal[]
+
+  @@map("reagents")
+}
+
+model PurchaseOrder {
+  id              String                @id @default(uuid())
+  status          PurchaseOrderStatus   @default(pending_approval)
+  requester_name  String?
+  requester_email String?
+  user_id         String?
+  user            User?                 @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  items           OrderItem[]
+  created_at      DateTime              @default(now())
+  updated_at      DateTime              @updatedAt
+
+  @@map("purchase_orders")
+}
+
+model OrderItem {
+  id                        String          @id @default(uuid())
+  purchase_order_id         String
+  purchase_order            PurchaseOrder   @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
+  reagent_id                String
+  reagent                   Reagent         @relation(fields: [reagent_id], references: [id])
+  quantity_requested        Decimal
+  price                     Decimal
+  currency                  CurrencyType
+  status                    OrderItemStatus @default(pending_approval)
+  justification             String?
+  approver_notes            String?
+  approved_by_user_id       String?
+  approved_by_user          User?           @relation(fields: [approved_by_user_id], references: [id], onDelete: SetNull)
+  approved_at               DateTime?
+  quantity_received         Decimal?
+  received_at               DateTime?
+  received_storage_location String?
+
+  @@map("order_items")
+}
+
+model ExchangeRate {
+  id            String   @id @default(uuid())
+  from_currency String   @default("USD")
+  to_currency   String   @default("BRL")
+  rate          Decimal
+  rate_date     DateTime @db.Date
+  created_at    DateTime @default(now())
+
+  @@unique([from_currency, to_currency, rate_date])
+  @@map("exchange_rates")
+}
+
+model StockWithdrawal {
+  id                String   @id @default(uuid())
+  reagent_id        String
+  reagent           Reagent  @relation(fields: [reagent_id], references: [id])
+  quantity          Decimal
+  withdrawn_by_name String?
+  withdrawn_by_email String?
+  user_id           String?
+  user              User?    @relation(fields: [user_id], references: [id], onDelete: SetNull)
+  created_at        DateTime @default(now())
+
+  @@map("stock_withdrawals")
+}
+
+
+// --- ENUMS ---
+
+enum PurchaseOrderStatus {
+  pending_approval
+  partially_approved
+  fully_approved
+  rejected
+  pending_receipt
+  partially_received
+  completed
+}
+
+enum OrderItemStatus {
+  pending_approval
+  approved
+  rejected
+  pending_receipt
+  received
+}
+
+enum CurrencyType {
+  BRL
+  USD
 }
