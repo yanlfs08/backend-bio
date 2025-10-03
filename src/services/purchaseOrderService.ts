@@ -58,21 +58,43 @@ export class PurchaseOrderService {
     }
   }
 
-  // Atualiza o status de um item (aprovar/rejeitar)
   async updateItemStatus(itemId: string, approverId: string, status: 'approved' | 'rejected', notes?: string) {
-    const updatedItem = await prisma.orderItem.update({
-      where: { id: itemId },
-      data: {
-        status: status === 'approved' ? 'pending_receipt' : 'rejected',
-        approved_by_user_id: approverId,
-        approved_at: new Date(),
-        approver_notes: notes,
-      },
+    return prisma.$transaction(async (tx) => {
+      const updatedItem = await tx.orderItem.update({
+        where: { id: itemId },
+        data: {
+          status: status === 'approved' ? 'pending_receipt' : 'rejected',
+          approved_by_user_id: approverId,
+          approved_at: new Date(),
+          approver_notes: notes,
+        },
+      })
+      const purchaseOrderId = updatedItem.purchase_order_id
+      const allItemsInOrder = await tx.orderItem.findMany({
+        where: { purchase_order_id: purchaseOrderId },
+      })
+
+      let newOrderStatus: PurchaseOrderStatus
+      const totalItems = allItemsInOrder.length
+      const approvedCount = allItemsInOrder.filter((item) => item.status === 'pending_receipt').length
+      const rejectedCount = allItemsInOrder.filter((item) => item.status === 'rejected').length
+      const processedCount = approvedCount + rejectedCount
+      if (processedCount === totalItems) {
+        if (approvedCount === 0) {
+          newOrderStatus = 'rejected'
+        } else {
+          newOrderStatus = 'fully_approved'
+        }
+      } else {
+        newOrderStatus = 'partially_approved'
+      }
+
+      await tx.purchaseOrder.update({
+        where: { id: purchaseOrderId },
+        data: { status: newOrderStatus },
+      })
+
+      return updatedItem
     })
-
-    // TODO: Adicionar lógica para atualizar o status do PurchaseOrder principal
-    // (ex: para 'partially_approved' ou 'fully_approved')
-
-    return updatedItem
   }
 }

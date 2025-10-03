@@ -24,6 +24,7 @@ export const createOrder = async (req: Request, res: Response) => {
     const newOrder = await purchaseOrderService.create(items, requester)
     return res.status(201).json(newOrder)
   } catch (error) {
+    console.error('Erro detalhado ao criar pedido:', error)
     return res.status(500).json({ message: 'Erro ao criar pedido.' })
   }
 }
