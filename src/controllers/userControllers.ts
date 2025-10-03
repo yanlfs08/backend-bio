@@ -82,3 +82,24 @@ export const forgotPasswordController = async (req: Request, res: Response) => {
     return res.status(500).json({ message: 'Erro interno no servidor.' })
   }
 }
+
+export const getAllUsersController = async (req: Request, res: Response) => {
+  try {
+    const users = await userService.getAll()
+    return res.status(200).json(users)
+  } catch (error: any) {
+    return res.status(500).json({ message: 'Erro interno no servidor.' })
+  }
+}
+
+export const updateUserController = async (req: Request, res: Response) => {
+  const { id } = req.params
+  const { roles, is_active } = req.body
+
+  try {
+    const updatedUser = await userService.updateUser(id, { roles, is_active })
+    return res.status(200).json(updatedUser)
+  } catch (error: any) {
+    return res.status(500).json({ message: 'Erro ao atualizar usuário.' })
+  }
+}

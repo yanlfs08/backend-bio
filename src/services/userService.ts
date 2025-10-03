@@ -86,4 +86,33 @@ export class UserService {
       await this.emailService.sendTemporaryPassword(user.email, tempPassword)
     }
   }
+
+  async getAll() {
+    // Retorna todos os usuários, selecionando apenas campos seguros
+    return prisma.user.findMany({
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        roles: true,
+        is_active: true,
+        created_at: true,
+      },
+    })
+  }
+
+  async updateUser(id: string, data: { roles?: string[]; is_active?: boolean }) {
+    // Atualiza um usuário específico e retorna os dados atualizados
+    return prisma.user.update({
+      where: { id },
+      data,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        roles: true,
+        is_active: true,
+      },
+    })
+  }
 }
