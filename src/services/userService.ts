@@ -3,6 +3,7 @@ import { prisma } from '../lib/prisma'
 import bcrypt from 'bcryptjs'
 import { User } from '@prisma/client'
 import crypto from 'crypto'
+import { EmailService } from './emailService'
 
 type UserCreateResponse = Omit<User, 'password_hash'>
 
