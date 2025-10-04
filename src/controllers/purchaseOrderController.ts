@@ -1,6 +1,7 @@
 // src/controllers/purchaseOrderController.ts
 import { Request, Response } from 'express'
 import { PurchaseOrderService } from '../services/purchaseOrderService'
+import { PurchaseOrderStatus, OrderItemStatus } from '@prisma/client'
 
 const purchaseOrderService = new PurchaseOrderService()
 
@@ -31,7 +32,10 @@ export const createOrder = async (req: Request, res: Response) => {
 
 export const getAllOrders = async (req: Request, res: Response) => {
   try {
-    const orders = await purchaseOrderService.findAll(req.user!)
+    // Lê o status do query param da URL (ex: /api/orders?status=rejected)
+    const status = req.query.status as PurchaseOrderStatus | undefined
+
+    const orders = await purchaseOrderService.findAll(req.user!, status) // Passa o status para o serviço
     return res.status(200).json(orders)
   } catch (error) {
     return res.status(500).json({ message: 'Erro ao buscar pedidos.' })
@@ -52,5 +56,20 @@ export const updateOrderItemStatus = async (req: Request, res: Response) => {
     return res.status(200).json(updatedItem)
   } catch (error) {
     return res.status(500).json({ message: 'Erro ao atualizar item do pedido.' })
+  }
+}
+
+export const getItemsByStatus = async (req: Request, res: Response) => {
+  const status = req.query.status as OrderItemStatus | undefined
+
+  if (!status) {
+    return res.status(400).json({ message: "O parâmetro 'status' é obrigatório." })
+  }
+
+  try {
+    const items = await purchaseOrderService.findItemsByStatus(req.user!, status)
+    return res.status(200).json(items)
+  } catch (error) {
+    return res.status(500).json({ message: 'Erro ao buscar itens do pedido.' })
   }
 }

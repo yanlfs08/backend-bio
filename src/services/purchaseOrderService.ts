@@ -1,6 +1,6 @@
 // src/services/purchaseOrderService.ts
 import { prisma } from '../lib/prisma'
-import { Prisma } from '@prisma/client'
+import { Prisma, PurchaseOrderStatus, OrderItemStatus } from '@prisma/client'
 
 // Definimos um tipo para o usuário que vem do token
 type AuthUser = { sub: string; roles: string[]; name: string; email: string }
@@ -8,10 +8,7 @@ type OrderItemCreateInput = Prisma.OrderItemUncheckedCreateInput
 
 export class PurchaseOrderService {
   // Cria um pedido e seus itens em uma única transação
-  async create(
-    items: Omit<OrderItemCreateInput, 'purchase_order_id'>[],
-    requester: { name?: string; email?: string; userId?: string },
-  ) {
+  async create(items: any[], requester: { name?: string; email?: string; userId?: string }) {
     return prisma.$transaction(async (tx) => {
       // 1. Cria o cabeçalho do pedido
       const order = await tx.purchaseOrder.create({
@@ -25,7 +22,11 @@ export class PurchaseOrderService {
 
       // 2. Associa os itens ao pedido recém-criado
       const itemsToCreate = items.map((item) => ({
-        ...item,
+        reagent_id: item.reagent_id,
+        quantity_requested: item.quantity_requested,
+        price: item.price,
+        currency: item.currency,
+        justification: item.justification,
         purchase_order_id: order.id,
       }))
 
@@ -39,23 +40,36 @@ export class PurchaseOrderService {
   }
 
   // Lista os pedidos com base na role do usuário
-  async findAll(user: AuthUser) {
+  async findAll(user: AuthUser, status?: PurchaseOrderStatus) {
+    // Adicione o parâmetro 'status'
     const isAdminOrManager = user.roles.includes('admin') || user.roles.includes('manager')
 
-    if (isAdminOrManager) {
-      // Admin/Manager veem todos os pedidos
-      return prisma.purchaseOrder.findMany({
-        orderBy: { created_at: 'desc' },
-        include: { user: { select: { name: true } }, items: true }, // Inclui itens e nome do usuário
-      })
-    } else {
-      // Usuário normal vê apenas seus próprios pedidos
-      return prisma.purchaseOrder.findMany({
-        where: { user_id: user.sub },
-        orderBy: { created_at: 'desc' },
-        include: { items: true },
-      })
+    // Constrói a cláusula 'where' dinamicamente
+    const whereClause: Prisma.PurchaseOrderWhereInput = {}
+
+    if (!isAdminOrManager) {
+      whereClause.user_id = user.sub // Usuário normal só pode ver seus próprios pedidos
     }
+
+    if (status) {
+      whereClause.status = status // Adiciona o filtro de status se ele for fornecido
+    }
+
+    return prisma.purchaseOrder.findMany({
+      where: whereClause,
+      orderBy: { created_at: 'desc' },
+      include: {
+        user: { select: { name: true } },
+        items: {
+          // Inclui os itens e os detalhes do reagente de cada item
+          include: {
+            reagent: {
+              select: { name: true, manufacturer: true },
+            },
+          },
+        },
+      },
+    })
   }
 
   async updateItemStatus(itemId: string, approverId: string, status: 'approved' | 'rejected', notes?: string) {
@@ -95,6 +109,31 @@ export class PurchaseOrderService {
       })
 
       return updatedItem
+    })
+  }
+  async findItemsByStatus(user: AuthUser, status: OrderItemStatus) {
+    const isAdminOrManager = user.roles.includes('admin') || user.roles.includes('manager')
+
+    const whereClause: Prisma.OrderItemWhereInput = {
+      status: status,
+    }
+
+    if (!isAdminOrManager) {
+      // Usuário normal só pode ver itens de seus próprios pedidos
+      whereClause.purchase_order = {
+        user_id: user.sub,
+      }
+    }
+
+    return prisma.orderItem.findMany({
+      where: whereClause,
+      include: {
+        reagent: true, // Inclui detalhes completos do reagente
+        purchase_order: {
+          // Inclui detalhes de quem solicitou
+          select: { requester_name: true, requester_email: true, user: { select: { name: true } } },
+        },
+      },
     })
   }
 }

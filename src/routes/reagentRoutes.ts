@@ -12,11 +12,8 @@ import {
 
 const reagentRoutes = Router()
 
-// --- Rotas Protegidas ---
-
-// Listar todos e buscar por ID: qualquer usuário logado pode fazer
-reagentRoutes.get('/', authMiddleware, getAllReagents)
-reagentRoutes.get('/:id', authMiddleware, getReagentById)
+reagentRoutes.get('/', getAllReagents)
+reagentRoutes.get('/:id', getReagentById)
 
 // Criar, atualizar e deletar: apenas manager ou admin
 reagentRoutes.post('/', authMiddleware, checkRole(['manager', 'admin']), createReagent)

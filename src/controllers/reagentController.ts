@@ -10,6 +10,8 @@ export const createReagent = async (req: Request, res: Response) => {
     const newReagent = await reagentService.create(req.body)
     return res.status(201).json(newReagent)
   } catch (error) {
+    // --- DEBUG ---
+    console.error('Erro detalhado ao criar reagente:', error)
     if (error instanceof Prisma.PrismaClientKnownRequestError) {
       if (error.code === 'P2002') {
         return res.status(409).json({ message: 'Já existe um reagente com este número de catálogo.' })
