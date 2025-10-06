@@ -1,16 +1,21 @@
 // src/services/purchaseOrderService.ts
 import { prisma } from '../lib/prisma'
-import { Prisma, PurchaseOrderStatus, OrderItemStatus } from '@prisma/client'
+import { Prisma, PurchaseOrderStatus } from '@prisma/client'
 
-// Definimos um tipo para o usuário que vem do token
+// Tipos de dados
 type AuthUser = { sub: string; roles: string[]; name: string; email: string }
 type OrderItemCreateInput = Prisma.OrderItemUncheckedCreateInput
+type PrismaTransactionClient = Omit<
+  Prisma.PrismaClient,
+  '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
+>
 
 export class PurchaseOrderService {
-  // Cria um pedido e seus itens em uma única transação
+  /**
+   * Cria um pedido e seus itens em uma única transação.
+   */
   async create(items: any[], requester: { name?: string; email?: string; userId?: string }) {
     return prisma.$transaction(async (tx) => {
-      // 1. Cria o cabeçalho do pedido
       const order = await tx.purchaseOrder.create({
         data: {
           user_id: requester.userId,
@@ -20,7 +25,7 @@ export class PurchaseOrderService {
         },
       })
 
-      // 2. Associa os itens ao pedido recém-criado
+      // Mapeia os dados do frontend para o formato esperado pelo Prisma
       const itemsToCreate = items.map((item) => ({
         reagent_id: item.reagent_id,
         quantity_requested: item.quantity_requested,
@@ -30,7 +35,6 @@ export class PurchaseOrderService {
         purchase_order_id: order.id,
       }))
 
-      // 3. Cria todos os itens
       await tx.orderItem.createMany({
         data: itemsToCreate,
       })
@@ -39,20 +43,23 @@ export class PurchaseOrderService {
     })
   }
 
-  // Lista os pedidos com base na role do usuário
+  /**
+   * Lista os pedidos com base na role do usuário e em um filtro de status opcional.
+   */
   async findAll(user: AuthUser, status?: PurchaseOrderStatus) {
-    // Adicione o parâmetro 'status'
     const isAdminOrManager = user.roles.includes('admin') || user.roles.includes('manager')
 
-    // Constrói a cláusula 'where' dinamicamente
     const whereClause: Prisma.PurchaseOrderWhereInput = {}
 
     if (!isAdminOrManager) {
-      whereClause.user_id = user.sub // Usuário normal só pode ver seus próprios pedidos
+      whereClause.user_id = user.sub
     }
-
     if (status) {
-      whereClause.status = status // Adiciona o filtro de status se ele for fornecido
+      if (Array.isArray(status)) {
+        whereClause.status = { in: status }
+      } else {
+        whereClause.status = status
+      }
     }
 
     return prisma.purchaseOrder.findMany({
@@ -61,7 +68,6 @@ export class PurchaseOrderService {
       include: {
         user: { select: { name: true } },
         items: {
-          // Inclui os itens e os detalhes do reagente de cada item
           include: {
             reagent: {
               select: { name: true, manufacturer: true },
@@ -72,6 +78,9 @@ export class PurchaseOrderService {
     })
   }
 
+  /**
+   * Atualiza o status de um item (aprovação/rejeição) e recalcula o status do pedido pai.
+   */
   async updateItemStatus(itemId: string, approverId: string, status: 'approved' | 'rejected', notes?: string) {
     return prisma.$transaction(async (tx) => {
       const updatedItem = await tx.orderItem.update({
@@ -83,57 +92,50 @@ export class PurchaseOrderService {
           approver_notes: notes,
         },
       })
-      const purchaseOrderId = updatedItem.purchase_order_id
-      const allItemsInOrder = await tx.orderItem.findMany({
-        where: { purchase_order_id: purchaseOrderId },
-      })
 
-      let newOrderStatus: PurchaseOrderStatus
-      const totalItems = allItemsInOrder.length
-      const approvedCount = allItemsInOrder.filter((item) => item.status === 'pending_receipt').length
-      const rejectedCount = allItemsInOrder.filter((item) => item.status === 'rejected').length
-      const processedCount = approvedCount + rejectedCount
-      if (processedCount === totalItems) {
-        if (approvedCount === 0) {
-          newOrderStatus = 'rejected'
-        } else {
-          newOrderStatus = 'fully_approved'
-        }
-      } else {
-        newOrderStatus = 'partially_approved'
-      }
-
-      await tx.purchaseOrder.update({
-        where: { id: purchaseOrderId },
-        data: { status: newOrderStatus },
-      })
+      await this._updateParentOrderStatus(updatedItem.purchase_order_id, tx)
 
       return updatedItem
     })
   }
-  async findItemsByStatus(user: AuthUser, status: OrderItemStatus) {
-    const isAdminOrManager = user.roles.includes('admin') || user.roles.includes('manager')
 
-    const whereClause: Prisma.OrderItemWhereInput = {
-      status: status,
-    }
+  /**
+   * Função auxiliar para recalcular e atualizar o status de um PurchaseOrder.
+   * @param purchaseOrderId O ID do pedido pai a ser verificado.
+   * @param tx O cliente de transação do Prisma.
+   */
+  async _updateParentOrderStatus(purchaseOrderId: string, tx: PrismaTransactionClient) {
+    const allItemsInOrder = await tx.orderItem.findMany({
+      where: { purchase_order_id: purchaseOrderId },
+    })
 
-    if (!isAdminOrManager) {
-      // Usuário normal só pode ver itens de seus próprios pedidos
-      whereClause.purchase_order = {
-        user_id: user.sub,
+    const totalItems = allItemsInOrder.length
+
+    const receivedCount = allItemsInOrder.filter((i) => i.status === 'received').length
+    const pendingReceiptCount = allItemsInOrder.filter((i) => i.status === 'pending_receipt').length
+    const rejectedCount = allItemsInOrder.filter((i) => i.status === 'rejected').length
+
+    let newOrderStatus: PurchaseOrderStatus
+
+    if (receivedCount === totalItems) {
+      newOrderStatus = 'completed'
+    } else if (receivedCount > 0) {
+      newOrderStatus = 'partially_received'
+    } else if (pendingReceiptCount + rejectedCount === totalItems) {
+      if (pendingReceiptCount === 0) {
+        newOrderStatus = 'rejected'
+      } else {
+        newOrderStatus = 'fully_approved'
       }
+    } else if (pendingReceiptCount + rejectedCount > 0) {
+      newOrderStatus = 'partially_approved'
+    } else {
+      newOrderStatus = 'pending_approval'
     }
 
-    return prisma.orderItem.findMany({
-      where: whereClause,
-      include: {
-        reagent: true, // Inclui detalhes completos do reagente
-        purchase_order: {
-          // Inclui detalhes de quem solicitou
-          select: { requester_name: true, requester_email: true, user: { select: { name: true } } },
-        },
-      },
+    await tx.purchaseOrder.update({
+      where: { id: purchaseOrderId },
+      data: { status: newOrderStatus },
     })
   }
 }

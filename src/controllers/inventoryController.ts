@@ -1,8 +1,10 @@
 // src/controllers/inventoryController.ts
 import { Request, Response } from 'express'
 import { InventoryService } from '../services/inventoryService'
+import { PurchaseOrderService } from '../services/purchaseOrderService'
 
-const inventoryService = new InventoryService()
+const purchaseOrderService = new PurchaseOrderService()
+const inventoryService = new InventoryService(purchaseOrderService)
 
 export const receiveOrderItemController = async (req: Request, res: Response) => {
   const { itemId } = req.params
